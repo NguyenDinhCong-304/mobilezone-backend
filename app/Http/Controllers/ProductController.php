@@ -19,7 +19,7 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Product::with(['category', 'sale', 'store']);
+        $query = Product::with(['category','brand' , 'sale', 'store']);
 
         // Tìm kiếm theo tên sản phẩm
         if ($request->filled('search')) {
@@ -29,6 +29,11 @@ class ProductController extends Controller
         // Lọc theo danh mục
         if ($request->filled('category_id')) {
             $query->where('category_id', $request->category_id);
+        }
+
+        // Lọc theo thương hiệu
+        if ($request->filled('brand_id')) {
+            $query->where('brand_id', $request->brand_id);
         }
 
         // Lọc theo trạng thái
@@ -49,6 +54,7 @@ class ProductController extends Controller
     {
         $request->validate([
             'category_id'   => 'required|exists:category,id',
+            'brand_id'      => 'required|exists:brands,id',
             'name'          => 'required|string|max:255',
             'slug'          => 'required|string|max:255|unique:product,slug',
             'price_buy'     => 'required|numeric|min:0',
@@ -66,6 +72,7 @@ class ProductController extends Controller
         // 1. Lưu product
         $product = Product::create([
             'category_id' => $request->category_id,
+            'brand_id'    => $request->brand_id,
             'name'        => $request->name,
             'slug'        => $request->slug,
             'content'     => $request->content,
@@ -100,7 +107,6 @@ class ProductController extends Controller
             'data'    => $product->load('images', 'attributes'),
         ]);
     }
-
 
     /**
      * Display the specified resource.
@@ -137,8 +143,9 @@ class ProductController extends Controller
             // Cập nhật thông tin sản phẩm
             $product->update([
                 'category_id' => $request->category_id ?? $product->category_id,
+                'brand_id'    => $request->brand_id ?? $product->brand_id,
                 'name'        => $request->name ?? $product->name,
-                'slug'        => $request->name ? Str::slug($request->name) : $product->slug,
+                'slug'        => $request->slug ?? Str::slug($request->name ?? $product->name),
                 'thumbnail'   => $thumbnailPath,
                 'content'     => $request->content ?? $product->content,
                 'description' => $request->description ?? $product->description,
@@ -202,7 +209,6 @@ class ProductController extends Controller
                 }
             }
 
-
             DB::commit();
 
             return response()->json([
@@ -216,30 +222,34 @@ class ProductController extends Controller
         }
     }
 
-
     /**
-     * Xóa mềm sản phẩm
+     * Xóa sản phẩm
      */
     public function destroy(string $id)
     {
-        // $product = Product::findOrFail($id);
-        // $product->delete(); //Xóa mềm
-        // return response()->json(['message' => 'Xóa sản phẩm thành công']);
         $product = Product::withTrashed()->findOrFail($id);
 
-        // Xóa hết ảnh liên quan
+        // Xóa ảnh
         foreach ($product->images as $img) {
-            \Storage::disk('public')->delete($img->image);
+            Storage::disk('public')->delete($img->image);
             $img->delete();
         }
 
-        // Xóa luôn sản phẩm
+        // Xóa sale / store
+        $product->sale()->delete();
+        $product->store()->delete();
+
+        // Xóa thuộc tính
+        $product->attributes()->detach();
+
+        // Xóa sản phẩm
         $product->forceDelete();
 
         return response()->json([
             'message' => 'Xóa sản phẩm thành công',
         ]);
     }
+
     // public function forceDelete($id)
     // {
     //     $product = Product::withTrashed()->findOrFail($id);

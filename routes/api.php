@@ -9,6 +9,7 @@ use App\Http\Controllers\ProductSaleController;
 
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BannerController;
+use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\MenuController;
 use App\Http\Controllers\PostController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\AttributeController;
 
 Route::apiResources([
     'banner' => BannerController::class,
+    'brand' => BrandController::class,
     'category' => CategoryController::class,
     'contact' => ContactController::class,
     'menu' => MenuController::class,

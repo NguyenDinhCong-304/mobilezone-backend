@@ -186,7 +186,7 @@ class ProductSaleController extends Controller
             ], 422);
         }
 
-        // ✅ Cập nhật khuyến mãi
+        // Cập nhật khuyến mãi
         $sale->update([
             'name' => $request->name,
             'product_id' => $request->product_id,
