@@ -50,6 +50,7 @@ class BrandController extends Controller
             'name' => $request->name,
             'slug' => Str::slug($request->name),
             'logo' => $path,
+            'country' => $request->country,
             'description' => $request->description,
             'status' => $request->status,
             'created_by' => auth()->id() ?? 1,
@@ -93,6 +94,7 @@ class BrandController extends Controller
         $brand->update([
             'name' => $request->name,
             'slug' => Str::slug($request->name),
+            'country' => $request->country,
             'logo' => $path,
             'description' => $request->description,
             'status' => $request->status,

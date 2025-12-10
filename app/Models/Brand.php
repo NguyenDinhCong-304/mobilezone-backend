@@ -16,6 +16,7 @@ class Brand extends Model
         'name',
         'slug',
         'logo',
+        'country',
         'description',
         'status',
         'created_by',
