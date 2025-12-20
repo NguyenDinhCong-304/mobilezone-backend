@@ -14,26 +14,30 @@ class PostController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Post::with(['topic']);
+        $query = Post::with('topic');
 
-        // Nếu có tìm kiếm
         if ($request->filled('search')) {
-            $query->where('title', 'LIKE', "%{$request->search}%");
+            $query->where('title', 'like', '%' . $request->search . '%');
         }
 
-        // Lọc theo topic_id
-        if ($request->filled('topic_id')) {
-            $query->where('topic_id', $request->topic_id);
+        if ($request->filled('topic')) {
+            $query->where('topic_id', $request->topic);
         }
 
-        // Nếu có lọc trạng thái
-        if ($request->filled('status')) { // chỉ lọc khi có giá trị thực sự
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // Phân trang (mặc định 10 mục/trang)
-        $posts = $query->orderBy('id', 'desc')->paginate(10);
-        
+        // Số bài / trang (mặc định 6 cho client)
+        $perPage = (int) $request->get('per_page', 6);
+
+        // Giới hạn tránh spam
+        $perPage = min(max($perPage, 1), 50);
+
+        $posts = $query
+            ->orderBy('id', 'desc')
+            ->paginate($perPage);
+
         return response()->json($posts);
     }
 

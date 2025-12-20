@@ -19,6 +19,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PostControllers;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\AttributeController;
+use App\Http\Controllers\UploadController;
 
 Route::apiResources([
     'banner' => BannerController::class,
@@ -28,7 +29,7 @@ Route::apiResources([
     'menu' => MenuController::class,
     'product' => ProductController::class,
     'productstore' => ProductStoreController::class,
-    'productsale' => ProductSaleController::class,
+    //'productsale' => ProductSaleController::class,
     'topic' => TopicController::class,
     'post' => PostController::class,
     'user' => UserController::class,
@@ -36,6 +37,8 @@ Route::apiResources([
     'setting' => SettingController::class,
     'attribute' => AttributeController::class,
 ]);
+
+Route::post('/upload/summernote', [UploadController::class, 'summernote']);
 
 //Route::delete('/product/{id}', [ProductController::class, 'destroy']);       // xóa mềm
 //Route::delete('/product/force/{id}', [ProductController::class, 'forceDestroy']); // xóa cứng
@@ -48,9 +51,10 @@ Route::get('/product/search', [ProductController::class, 'search']);
 
 Route::get('post-new', [PostController::class,'post_new']);
 
-Route::apiResource('productsale', ProductSaleController::class)->except(['show']);
-Route::post('productsale/import', [ProductSaleController::class, 'import']);
 Route::get('/productsale/template', [ProductSaleController::class, 'exportTemplate']);
+Route::post('productsale/import', [ProductSaleController::class, 'import']);
+Route::apiResource('productsale', ProductSaleController::class)->except(['show']);
+Route::get('/productsale/{id}', [ProductSaleController::class, 'show']);
 
 Route::get('/product/{id}/attributes', [ProductController::class, 'getAttributes']);
 Route::post('/product/{id}/attributes', [ProductController::class, 'updateAttributes']);

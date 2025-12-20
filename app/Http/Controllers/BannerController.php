@@ -21,6 +21,10 @@ class BannerController extends Controller
             $query->where('name', 'like', '%' . $request->search . '%');
         }
 
+        if ($request->filled('position')) {
+            $query->where('position', $request->position);
+        }
+
         // Lọc theo trạng thái
         if ($request->filled('status')) { // chỉ lọc khi có giá trị thực sự
             $query->where('status', $request->status);
