@@ -44,45 +44,42 @@ class OrderController extends Controller
      */
     public function store(Request $request)
     {
-        try {
-            // Lưu đơn hàng
-            $order = Order::create([
-                'user_id' => $request->user_id,
-                'name' => $request->name,
-                'address' => $request->address,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'note' => $request->note,
-                //'payment_method' => $request->payment_method,
-                'status' => '0',// mới đặt
-                'created_by' => $request->user_id,
-            ]);
+        $request->validate([
+            'name' => 'required|string',
+            'phone' => 'required|string',
+            'email' => 'required|email',
+            'address' => 'required|string',
+            'cart_items' => 'required|array|min:1',
+        ]);
 
-            // Lưu chi tiết đơn hàng
-            foreach ($request->cart_items as $item) {
-                OrderDetail::create([
-                    'order_id' => $order->id,
-                    'product_id' => $item['id'],
-                    'qty' => $item['quantity'],
-                    'price' => $item['price'],
-                    'amount' => $item['price'] * $item['quantity'],
-                ]);
-            }
+        $user = auth()->user(); // lấy từ JWT
 
-            // Gửi email xác nhận
-            //Mail::to($request->email)->send(new OrderConfirmMail($order));
+        $order = Order::create([
+            'user_id' => $user->id,
+            'name' => $request->name,
+            'address' => $request->address,
+            'email' => $request->email,
+            'phone' => $request->phone,
+            'note' => $request->note,
+            'status' => 0,
+            'created_by' => $user->id,
+        ]);
 
-            return response()->json([
-                'status' => true,
-                'message' => 'Đặt hàng thành công!',
+        foreach ($request->cart_items as $item) {
+            OrderDetail::create([
                 'order_id' => $order->id,
+                'product_id' => $item['id'],
+                'qty' => $item['quantity'],
+                'price' => $item['price'],
+                'amount' => $item['price'] * $item['quantity'],
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Lỗi khi lưu đơn hàng: ' . $e->getMessage()
-            ], 500);
         }
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Đặt hàng thành công',
+            'order_id' => $order->id,
+        ]);
     }
 
     /**
@@ -112,7 +109,7 @@ class OrderController extends Controller
     public function update(Request $request, $id)
     {
         $request->validate([
-            'status' => 'required|integer|in:0,1,2', // 0=Đã đặt, 1=Đang giao, 2=Đã giao
+            'status' => 'required|integer|in:0,1,2,3', // 0=Đã hủy, 1=đẵ đặt , 2=đang giao, 3=đã giao
         ]);
 
         $order = Order::findOrFail($id);
@@ -144,20 +141,35 @@ class OrderController extends Controller
     }
     public function getOrdersByUser($id)
     {
-        $orders = Order::with('details')->where('user_id', $id)->get();
-
-        $orders = $orders->map(function ($order) {
-            return [
-                'id' => $order->id,
-                'status' => $order->status,
-                'created_at' => $order->created_at,
-                'total' => $order->total, // ✅ tự động tính bằng accessor getTotalAttribute()
-            ];
-        });
+        $orders = Order::with([
+            'details.product'
+        ])
+        ->where('user_id', $id)
+        ->orderByDesc('created_at')
+        ->get();
 
         return response()->json([
             'status' => true,
             'data' => $orders
+        ]);
+    }
+
+    public function cancel($id)
+    {
+        $order = Order::findOrFail($id);
+
+        // Chỉ cho hủy khi ĐÃ ĐẶT
+        if ($order->status !== 1) {
+            return response()->json([
+                'message' => 'Đơn hàng không thể hủy'
+            ], 403);
+        }
+
+        $order->status = 0; // ĐÃ HỦY
+        $order->save();
+
+        return response()->json([
+            'message' => 'Đã hủy đơn hàng thành công'
         ]);
     }
 

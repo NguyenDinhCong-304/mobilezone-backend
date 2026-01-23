@@ -143,6 +143,12 @@ class CategoryController extends Controller
     public function destroy(string $id)
     {
         $category = Category::findOrFail($id);
+        if ($category->products()->count() > 0) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Không thể xóa danh mục vì vẫn còn sản phẩm!'
+            ], 400);
+        }
         if ($category->image && Storage::disk('public')->exists($category->image)) {
             Storage::disk('public')->delete($category->image);
         }

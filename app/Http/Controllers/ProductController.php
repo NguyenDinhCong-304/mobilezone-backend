@@ -113,7 +113,7 @@ class ProductController extends Controller
      */
     public function show(string $id)
     {
-        $product = Product::with(['images', 'sale', 'store', 'attributes'])
+        $product = Product::with(['category', 'brand', 'images', 'sale', 'store', 'attributes'])
             ->findOrFail($id);
         // Nếu muốn trả ra kèm đường dẫn đầy đủ cho thumbnail
         // $product->thumbnail_url = asset('storage/' . $product->thumbnail);
@@ -125,13 +125,13 @@ class ProductController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::with('images', 'attributes', 'sale', 'store')->findOrFail($id);
 
         DB::beginTransaction();
+
         try {
-            // Nếu có file thumbnail mới thì lưu lại
+            // ===== 1. Thumbnail (ảnh chính) =====
             if ($request->hasFile('thumbnail')) {
-                // Xóa ảnh cũ nếu có
                 if ($product->thumbnail && Storage::disk('public')->exists($product->thumbnail)) {
                     Storage::disk('public')->delete($product->thumbnail);
                 }
@@ -140,7 +140,7 @@ class ProductController extends Controller
                 $thumbnailPath = $product->thumbnail;
             }
 
-            // Cập nhật thông tin sản phẩm
+            // ===== 2. Cập nhật thông tin sản phẩm =====
             $product->update([
                 'category_id' => $request->category_id ?? $product->category_id,
                 'brand_id'    => $request->brand_id ?? $product->brand_id,
@@ -154,57 +154,73 @@ class ProductController extends Controller
                 'updated_by'  => auth()->id() ?? 1,
             ]);
 
-            // Cập nhật danh sách ảnh (nếu có)
-            if ($request->hasFile('images')) {
-                // Xóa ảnh cũ
-                foreach ($product->images as $img) {
-                    if (Storage::disk('public')->exists($img->image)) {
-                        Storage::disk('public')->delete($img->image);
+            // ===== 3. Xóa ảnh phụ (nếu frontend gửi yêu cầu) =====
+            if ($request->has('deleted_images')) {
+                $deletedIds = json_decode($request->input('deleted_images', '[]'), true);
+                if (is_array($deletedIds)) {
+                    $imagesToDelete = $product->images()->whereIn('id', $deletedIds)->get();
+                    foreach ($imagesToDelete as $img) {
+                        if (Storage::disk('public')->exists($img->image)) {
+                            Storage::disk('public')->delete($img->image);
+                        }
+                        $img->delete();
                     }
-                    $img->delete();
-                }
-
-                // Lưu ảnh mới
-                foreach ($request->file('images') as $file) {
-                    $path = $file->store('products/images', 'public');
-                    $product->images()->create(['image' => $path]);
                 }
             }
 
-            // Cập nhật sale (nếu có)
+            // ===== 4. Thêm hoặc thay đổi ảnh phụ =====
+            $images = $request->file('images');
+
+            if ($images) {
+                // Laravel có thể trả 1 UploadedFile duy nhất nếu chỉ có 1 file
+                if (!is_array($images)) {
+                    $images = [$images];
+                }
+
+                foreach ($images as $file) {
+                    if ($file instanceof \Illuminate\Http\UploadedFile) {
+                        $path = $file->store('products/images', 'public');
+                        $product->images()->create(['image' => $path]);
+                    }
+                }
+            }
+
+            // ===== 5. Sale & Store =====
             if ($request->has('sale')) {
                 $product->sale()->delete();
                 $product->sale()->create($request->sale);
             }
 
-            // Cập nhật store (nếu có)
             if ($request->has('store')) {
                 $product->store()->delete();
                 $product->store()->create($request->store);
             }
 
-            // Nếu attributes được gửi dạng JSON string thì decode
-            if ($request->has('attributes') && is_string($request->attributes)) {
-                $request->merge(['attributes' => json_decode($request->attributes, true)]);
+            // ===== 6. Attributes =====
+            $attributes = $request->input('attributes', []);
+
+            // Nếu là string (lỗi JSON hoặc frontend gửi), decode
+            if (is_string($attributes)) {
+                $attributes = json_decode($attributes, true) ?? [];
             }
 
-            // Cập nhật attributes
-            if ($request->has('attributes')) {
-                $attributes = json_decode($request->input('attributes'), true);
+            // Nếu null, chuyển thành array rỗng
+            if (!is_array($attributes)) {
+                $attributes = [];
+            }
 
-                // Xóa quan hệ cũ (chỉ trong bảng trung gian, không ảnh hưởng bảng attributes)
-                $product->attributes()->detach();
+            // Xóa quan hệ cũ
+            $product->attributes()->detach();
 
-                foreach ($attributes as $attr) {
-                    if (!empty($attr['name']) && !empty($attr['value'])) {
-                        $attributeModel = \App\Models\Attribute::withTrashed()->where('name', $attr['name'])->first();
-                        if ($attributeModel) {
-                            $product->attributes()->attach($attributeModel->id, [
-                                'value' => $attr['value'],
-                                'created_at' => now(),
-                                'updated_at' => now(),
-                            ]);
-                        }
+            foreach ($attributes as $attr) {
+                if (!empty($attr['name']) && !empty($attr['value'])) {
+                    $attrModel = \App\Models\Attribute::withTrashed()->where('name', $attr['name'])->first();
+                    if ($attrModel) {
+                        $product->attributes()->attach($attrModel->id, [
+                            'value' => $attr['value'],
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ]);
                     }
                 }
             }
@@ -221,6 +237,7 @@ class ProductController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
 
     /**
      * Xóa sản phẩm
@@ -447,7 +464,7 @@ class ProductController extends Controller
     public function product_all(Request $request)
     {
         $limit = (int) $request->get('limit', 8);
-
+        
         // Tổng số lượng tồn kho theo product_id
         $productStore = ProductStore::query()
             ->select('product_id', DB::raw('SUM(qty) as total_qty'))
@@ -471,6 +488,10 @@ class ProductController extends Controller
                 'ps.total_qty'
             )
             ->orderBy('product.created_at', 'desc');
+
+        if ($request->filled('status')) {
+            $query->where('product.status', $request->status);
+        }
 
         if ($request->has('category_id')) {
             $query->where('product.category_id', $request->category_id);
@@ -508,10 +529,15 @@ class ProductController extends Controller
     
     public function search(Request $request)
     {
-        $keyword = $request->get('q', '');
-        $products = \App\Models\Product::select('id', 'name')
-            ->where('name', 'like', "%{$keyword}%")
-            ->limit(20)
+        $keyword = $request->query('q');
+
+        if (!$keyword) {
+            return response()->json([]);
+        }
+
+        $products = Product::where('name', 'like', "%$keyword%")
+            ->orWhere('description', 'like', "%$keyword%")
+            ->where('status', 1)
             ->get();
 
         return response()->json($products);

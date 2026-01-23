@@ -14,6 +14,7 @@ class Product extends Model
         'category_id', 'brand_id', 'name','slug','thumbnail','content',
         'description','price_buy','created_by','updated_by','status'
     ];
+    protected $appends = ['price_sale'];
 
     public function category() {
         return $this->belongsTo(Category::class);
@@ -62,6 +63,11 @@ class Product extends Model
         return $this->belongsToMany(Attribute::class, 'product_attribute', 'product_id', 'attribute_id')
                     ->withPivot('value') // lấy thêm cột value trong bảng trung gian
                     ->withTimestamps();
+    }
+
+    public function getPriceSaleAttribute()
+    {
+        return $this->sale?->price_sale;
     }
 
 }

@@ -14,6 +14,7 @@ class Order extends Model
         'user_id','name','email','phone','address','note',
         'created_by','updated_by','status'
     ];
+    protected $appends = ['total'];
 
     public function user() {
         return $this->belongsTo(User::class);

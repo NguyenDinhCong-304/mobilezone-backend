@@ -10,6 +10,8 @@ use App\Mail\VerifyEmailMail;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Tymon\JWTAuth\Facades\JWTAuth;
+
 
 class UserController extends Controller
 {
@@ -161,36 +163,50 @@ class UserController extends Controller
         $user = User::findOrFail($id);
 
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:user,email,' . $id,
-            'phone' => 'nullable|string|max:20',
-            'roles' => 'nullable|string',
-            'status' => 'required|in:0,1',
+            'name'     => 'required|string|max:255',
+            'email'    => 'required|email|unique:user,email,' . $id,
+            'phone'    => 'nullable|string|max:20',
             'password' => 'nullable|min:6|confirmed',
-            'avatar' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'avatar'   => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        // Upload ảnh nếu có
+        if (auth()->check() && auth()->user()->roles === 'admin') {
+            $request->validate([
+                'roles' => 'required|in:user,admin',
+            ]);
+
+            $validated['roles'] = $request->roles;
+        }
+
+        // Upload avatar
         if ($request->hasFile('avatar')) {
-            if ($user->avatar && file_exists(public_path($user->avatar))) {
-                unlink(public_path($user->avatar));
+
+            if ($user->avatar) {
+                Storage::disk('public')->delete(
+                    str_replace('storage/', '', $user->avatar)
+                );
             }
+
             $path = $request->file('avatar')->store('user', 'public');
             $validated['avatar'] = 'storage/' . $path;
         }
 
-        // Nếu có nhập password thì mã hoá và cập nhật
+        // Password
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
-            unset($validated['password']); // giữ nguyên nếu để trống
+            unset($validated['password']);
+        }
+
+        if (isset($validated['status'])) {
+            $validated['status'] = (int) $validated['status'];
         }
 
         $user->update($validated);
 
         return response()->json([
             'message' => 'Cập nhật người dùng thành công!',
-            'user' => $user->fresh(),
+            'user'    => $user->fresh(),
         ]);
     }
 
@@ -204,17 +220,6 @@ class UserController extends Controller
 
         return response()->json(['message' => 'Xóa vĩnh tài khoản thành công']);
     }
-
-    // /**
-    //  * Khôi phục sản phẩm đã xóa mềm
-    //  */
-    // public function restore(string $id)
-    // {
-    //     $user = User::withTrashed()->findOrFail($id);
-    //     $user->restore(); // khôi phục lại
-
-    //     return response()->json(['message' => 'Khôi phục tài khoản thành công']);
-    // }
    
     public function verifyEmail($token)
     {
@@ -233,67 +238,66 @@ class UserController extends Controller
 
     public function login(Request $request)
     {
-        // Bước 1: Validate dữ liệu đầu vào
         $validator = Validator::make($request->all(), [
             'login' => 'required|string',
             'password' => 'required|string|min:6',
-        ], [
-            'login.required' => 'Vui lòng nhập email, số điện thoại hoặc tên đăng nhập.',
-            'password.required' => 'Vui lòng nhập mật khẩu.',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'status' => false,
-                'message' => 'Dữ liệu không hợp lệ.',
                 'errors' => $validator->errors()
             ], 422);
         }
 
-        // Bước 2: Tìm user theo login input
         $loginInput = $request->login;
+
         $user = User::where('email', $loginInput)
-                    ->orWhere('phone', $loginInput)
-                    ->orWhere('username', $loginInput)
-                    ->first();
+            ->orWhere('phone', $loginInput)
+            ->orWhere('username', $loginInput)
+            ->first();
 
-        if (!$user) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Tài khoản không tồn tại. Vui lòng kiểm tra lại.'
-            ], 404);
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json(['message' => 'Sai tài khoản hoặc mật khẩu'], 401);
         }
 
-        // Bước 3: Kiểm tra tài khoản đã kích hoạt chưa
         if ($user->status == 0) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Tài khoản chưa được kích hoạt. Vui lòng xác thực email để tiếp tục.'
-            ], 403);
+            return response()->json(['message' => 'Tài khoản chưa kích hoạt'], 403);
         }
 
-        // Bước 4: Kiểm tra mật khẩu
-        if (!Hash::check($request->password, $user->password)) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Mật khẩu không chính xác. Vui lòng thử lại.'
-            ], 401);
-        }
+        // PHÁT JWT TOKEN
+        $token = JWTAuth::fromUser($user);
 
-        // Bước 5: Đăng nhập thành công và trả role
         return response()->json([
             'status' => true,
-            'message' => 'Đăng nhập thành công!',
-            'role' => $user->roles, // Thêm role để frontend điều hướng
+            'message' => 'Đăng nhập thành công',
+            'token' => $token,
+            'token_type' => 'Bearer',
+            'role' => $user->roles,
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
-                'email' => $user->email,
                 'username' => $user->username,
-                'avatar' => $user->avatar ? url($user->avatar) : null,
+                'email' => $user->email,
                 'phone' => $user->phone,
+                'avatar' => $user->avatar,
             ]
-        ], 200);
+        ]);
+    }
+
+    public function logout(Request $request)
+    {
+        try {
+            JWTAuth::invalidate(JWTAuth::getToken());
+
+            return response()->json([
+                'message' => 'Đăng xuất thành công'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Logout thất bại'
+            ], 500);
+        }
     }
 
     public function changePassword(Request $request, $id)

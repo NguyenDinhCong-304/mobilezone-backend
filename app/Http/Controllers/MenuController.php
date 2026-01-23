@@ -13,25 +13,36 @@ class MenuController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(Request $request)
+   public function index(Request $request)
     {
-        $query = Menu::query()->orderBy('sort_order', 'desc');
+        $mode = $request->get('mode', 'admin');
 
-        // Nếu có lọc theo loại (category, topic, page, custom)
-        if ($request->has('type') && $request->type !== '') {
+        $query = Menu::query()
+            ->where('status', 1)
+            ->orderBy('sort_order', 'desc');
+
+        if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
 
-        // Nếu có lọc theo trạng thái
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
+        // FRONTEND
+        if ($mode === 'frontend') {
+            $menus = $query
+                ->whereNull('parent_id')
+                ->with(['children' => function ($q) {
+                    $q->where('status', 1)
+                    ->orderBy('sort_order', 'asc');
+                }])
+                ->get();
+
+            return response()->json($menus);
         }
 
-        $menus = $query->get();
-
-        return response()->json($menus);
+        // ADMIN
+        return response()->json(
+            $query->with('parent')->paginate(10)
+        );
     }
-
 
     /**
      * Show the form for creating a new resource.
@@ -46,13 +57,20 @@ class MenuController extends Controller
      */
     public function store(Request $request)
     {
+        // Chuẩn hóa dữ liệu
+        $request->merge([
+            'type' => strtolower(trim($request->type)),
+            'status' => (int) $request->status,
+            'parent_id' => $request->parent_id ?: null,
+        ]);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'link' => 'required|string',
-            'type' => 'required|in:category,topic,page,custom',
-            'parent_id' => 'nullable|integer',
+            'type' => 'required|in:category,topic,page,main,footer',
+            'parent_id' => 'nullable|exists:menu,id',
             'table_id' => 'nullable|integer',
-            'sort_order' => 'nullable|integer',
+            'sort_order' => 'nullable|integer|min:0',
             'status' => 'required|in:0,1',
         ]);
 
@@ -60,7 +78,7 @@ class MenuController extends Controller
             'name' => $validated['name'],
             'link' => $validated['link'],
             'type' => $validated['type'],
-            'parent_id' => $validated['parent_id'] ?? 0,
+            'parent_id' => $validated['parent_id'] ?? null,
             'table_id' => $validated['table_id'] ?? null,
             'sort_order' => $validated['sort_order'] ?? 1,
             'created_by' => $request->user_id ?? 1,
@@ -83,37 +101,51 @@ class MenuController extends Controller
             'type' => 'required|in:category,topic,page',
         ]);
 
-        $model = null;
         switch ($validated['type']) {
             case 'category':
-                $model = Category::where('status', 1)->get(['id', 'name']);
+                $items = Category::where('status', 1)
+                    ->get(['id', 'name', 'slug']);
+                $parentId = 8; // ID menu "Sản phẩm"
+                $prefix = '/products/';
                 break;
+
             case 'topic':
-                $model = Topic::where('status', 1)->get(['id', 'name']);
+                $items = Topic::where('status', 1)
+                    ->get(['id', 'name', 'slug']);
+                //$parentId = 0;
+                $prefix = '/topic/';
                 break;
+
             case 'page':
-                $model = Post::where('type', 'page')->where('status', 1)->get(['id', 'title as name']);
+                $items = Post::where('type', 'page')
+                    ->where('status', 1)
+                    ->get(['id', 'title as name', 'slug']);
+                //$parentId = 0;
+                $prefix = '/page/';
                 break;
         }
 
-        foreach ($model as $item) {
+        foreach ($items as $item) {
             Menu::updateOrCreate(
-                ['table_id' => $item->id, 'type' => $validated['type']],
+                [
+                    'table_id' => $item->id,
+                    'type' => $validated['type'],
+                ],
                 [
                     'name' => $item->name,
-                    'link' => '/' . $validated['type'] . '/' . $item->id,
-                    'parent_id' => 0,
+                    'link' => $prefix . $item->id,
+                    'parent_id' => $parentId,
                     'sort_order' => 1,
-                    'created_by' => 1,
                     'status' => 1,
+                    'created_by' => 1,
                 ]
             );
         }
 
-        return response()->json(['message' => 'Đã thêm menu từ ' . $validated['type']]);
+        return response()->json([
+            'message' => 'Đã import menu từ ' . $validated['type']
+        ]);
     }
-
-
 
     /**
      * Display the specified resource.
@@ -142,13 +174,20 @@ class MenuController extends Controller
     {
         $menu = Menu::findOrFail($id);
 
+        // Chuẩn hóa dữ liệu từ frontend
+        $request->merge([
+            'type' => strtolower(trim($request->type)),
+            'status' => (int) $request->status,
+            'parent_id' => $request->parent_id ?: null,
+        ]);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'link' => 'required|string',
-            'type' => 'required|in:category,topic,page,custom',
-            'parent_id' => 'nullable|integer',
+            'type' => 'required|in:category,topic,page,footer,main',
+            'parent_id' => 'nullable|exists:menu,id',
             'table_id' => 'nullable|integer',
-            'sort_order' => 'nullable|integer',
+            'sort_order' => 'nullable|integer|min:0',
             'status' => 'required|in:0,1',
         ]);
 
@@ -156,37 +195,40 @@ class MenuController extends Controller
             'name' => $validated['name'],
             'link' => $validated['link'],
             'type' => $validated['type'],
-            'parent_id' => $validated['parent_id'] ?? 0,
+            'parent_id' => $validated['parent_id'] ?? null,
             'table_id' => $validated['table_id'] ?? null,
             'sort_order' => $validated['sort_order'] ?? 1,
             'updated_by' => $request->user_id ?? 1,
             'status' => $validated['status'],
         ]);
-
-        return response()->json(['message' => 'Cập nhật menu thành công!', 'menu' => $menu]);
+        //dd($request->all());
+        return response()->json([
+            'message' => 'Cập nhật menu thành công!',
+            'menu' => $menu
+        ]);
     }
-
 
     /**
      * Remove the specified resource from storage.
      */
     public function destroy(string $id)
     {
-        $menu = Menu::findOrFail($id);
-        $menu->delete(); //Xóa mềm
-        return response()->json(['message' => 'Xóa menu thành công']);
-    }
-
-    /**
-     * Xóa cứng sản phẩm (vĩnh viễn)
-     */
-    public function forceDestroy(string $id)
-    {
         $menu = Menu::withTrashed()->findOrFail($id);
         $menu->forceDelete(); // xóa hẳn khỏi DB
 
         return response()->json(['message' => 'Xóa vĩnh viễn menu thành công']);
     }
+
+    /**
+     * Xóa cứng sản phẩm (vĩnh viễn)
+     */
+    // public function forceDestroy(string $id)
+    // {
+    //     $menu = Menu::withTrashed()->findOrFail($id);
+    //     $menu->forceDelete(); // xóa hẳn khỏi DB
+
+    //     return response()->json(['message' => 'Xóa vĩnh viễn menu thành công']);
+    // }
 
     /**
      * Khôi phục sản phẩm đã xóa mềm

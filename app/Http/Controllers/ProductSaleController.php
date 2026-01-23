@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\ProductSale;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\ProductSaleImport;
 use App\Exports\ProductSaleTemplateExport;
+use Maatwebsite\Excel\Validators\ValidationException;
 
 class ProductSaleController extends Controller
 {
@@ -24,7 +26,7 @@ class ProductSaleController extends Controller
             });
         }
 
-        // Lọc trạng thái (1: hoạt động, 0: ngừng)
+        // Lọc trạng thái
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -120,17 +122,43 @@ class ProductSaleController extends Controller
     // Import file Excel
     public function import(Request $request)
     {
-        if (!$request->hasFile('file')) {
-            return response()->json(['message' => 'Không có file tải lên'], 400);
-        }
+        // 1️⃣ Validate file
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ], [
+            'file.required' => 'Vui lòng chọn file để import!',
+            'file.mimes'    => 'File phải có định dạng xlsx, xls hoặc csv.',
+        ]);
 
         try {
-            Excel::import(new ProductSaleImport, $request->file('file'));
+            // 2️⃣ Transaction: nếu lỗi rollback toàn bộ
+            DB::transaction(function () use ($request) {
+                Excel::import(new ProductSaleImport, $request->file('file'));
+            });
+
             return response()->json(['message' => 'Import dữ liệu thành công!']);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Lỗi khi import: ' . $e->getMessage()], 500);
+        } 
+        // 3️⃣ Bắt lỗi validation Excel
+        catch (ValidationException $e) {
+            $failures = $e->failures();
+            $messages = [];
+            foreach ($failures as $failure) {
+                $messages[] = "Dòng {$failure->row()} - Cột {$failure->attribute()}: " . implode(', ', $failure->errors());
+            }
+            return response()->json([
+                'message' => "Lỗi validation:\n" . implode("\n", $messages)
+            ], 422);
+        } 
+        // 4️⃣ Bắt các lỗi khác
+        catch (\Exception $e) {
+            \Log::error("Import ProductSale lỗi: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Lỗi khi import: ' . $e->getMessage()
+            ], 500);
         }
     }
+
+    // Export file Excel mẫu
     public function exportTemplate()
     {
         return Excel::download(new ProductSaleTemplateExport, 'product_sale_template.xlsx');

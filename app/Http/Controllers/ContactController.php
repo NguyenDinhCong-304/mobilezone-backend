@@ -132,15 +132,19 @@ class ContactController extends Controller
     public function reply(Request $request, string $id)
     {
         $validated = $request->validate([
-            'reply_id' => 'required|exists:users,id',
+            'reply_content' => 'required|string',
+            //'updated_by' => 'required|exists:users,id',
         ]);
 
         $contact = Contact::findOrFail($id);
 
+        $adminId = auth()->id() ?? 12;
+
         $contact->update([
-            'reply_id' => $validated['reply_id'],
+            'reply_content' => $validated['reply_content'],
+            'reply_id' => $adminId,
             'status' => 1, // Đánh dấu là đã trả lời
-            'updated_by' => $validated['reply_id'],
+            'updated_by' => $adminId,
         ]);
 
         return response()->json([
